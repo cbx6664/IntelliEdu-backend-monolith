@@ -1,22 +1,28 @@
-package com.cpuoverload.intelliedu.scoring.strategy;
+package com.cbx.intelliedu.scoring.strategy;
 
+import cn.hutool.crypto.digest.MD5;
 import cn.hutool.json.JSONUtil;
-import com.cpuoverload.intelliedu.manager.AiManager;
-import com.cpuoverload.intelliedu.model.dto.question.QuestionContent;
-import com.cpuoverload.intelliedu.model.dto.scoring.AiDoScoreRequest;
-import com.cpuoverload.intelliedu.model.entity.AnswerRecord;
-import com.cpuoverload.intelliedu.model.entity.Application;
-import com.cpuoverload.intelliedu.model.entity.Question;
-import com.cpuoverload.intelliedu.model.vo.QuestionVo;
-import com.cpuoverload.intelliedu.scoring.ScoringStrategy;
-import com.cpuoverload.intelliedu.scoring.annotation.ScoringStrategyConfig;
-import com.cpuoverload.intelliedu.service.QuestionService;
+import com.cbx.intelliedu.manager.AiManager;
+import com.cbx.intelliedu.model.dto.question.QuestionContent;
+import com.cbx.intelliedu.model.dto.scoring.AiDoScoreRequest;
+import com.cbx.intelliedu.model.entity.AnswerRecord;
+import com.cbx.intelliedu.model.entity.Application;
+import com.cbx.intelliedu.model.entity.Question;
+import com.cbx.intelliedu.model.vo.QuestionVo;
+import com.cbx.intelliedu.scoring.ScoringStrategy;
+import com.cbx.intelliedu.scoring.annotation.ScoringStrategyConfig;
+import com.cbx.intelliedu.service.QuestionService;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
+import com.sun.org.apache.bcel.internal.generic.NEW;
+import org.apache.commons.lang3.StringUtils;
 
 import javax.annotation.Resource;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
-import static com.cpuoverload.intelliedu.constant.AIConstant.AI_EVALUATION_SCORING_SYSTEM_MESSAGE;
+import static com.cbx.intelliedu.constant.AIConstant.AI_EVALUATION_SCORING_SYSTEM_MESSAGE;
 
 
 /**
@@ -30,6 +36,15 @@ public class AiEvaluationScoringStrategy implements ScoringStrategy {
 
     @Resource
     private AiManager aiManager;
+
+    /**
+     * 本地缓存
+     */
+    private final Cache<String, String> answerCacheMap =
+            Caffeine.newBuilder().initialCapacity(1024)
+                    // 缓存 5 分钟移除
+                    .expireAfterAccess(5L, TimeUnit.MINUTES)
+                    .build();
 
 
     private String getAiEvaluationScoringUserMessage(Application application, List<QuestionContent> questionContentList, List<String> answerList) {
@@ -51,6 +66,18 @@ public class AiEvaluationScoringStrategy implements ScoringStrategy {
     @Override
     public AnswerRecord doScore(List<String> answerList, Application application) throws Exception {
         Long appId = application.getId();
+        String jsonAnswerList = JSONUtil.toJsonStr(answerList);
+        String cacheKey = buildCacheKey(appId, jsonAnswerList);
+        String resultCache = answerCacheMap.getIfPresent(cacheKey);
+        // 缓存命中
+        if (StringUtils.isNotBlank(resultCache)){
+            AnswerRecord answerRecord = JSONUtil.toBean(resultCache, AnswerRecord.class);
+            answerRecord.setAppId(appId);
+            answerRecord.setAppType(application.getType());
+            answerRecord.setStrategy(application.getStrategy());
+            answerRecord.setAnswers(answerList);
+            return answerRecord;
+        }
         // 1. 根据 appId 查询到对应题目
         Question question = questionService.getQuestionByAppId(appId);
         QuestionVo questionVo = QuestionVo.objToVo(question);
@@ -64,6 +91,10 @@ public class AiEvaluationScoringStrategy implements ScoringStrategy {
         int start = result.indexOf("{");
         int end = result.lastIndexOf("}");
         String json = result.substring(start, end + 1);
+
+        // 缓存结果
+        answerCacheMap.put(cacheKey,json);
+
         // 3. 构造返回值，填充答案对象的属性
         AnswerRecord answerRecord = JSONUtil.toBean(json, AnswerRecord.class);
         answerRecord.setAppId(appId);
@@ -72,5 +103,10 @@ public class AiEvaluationScoringStrategy implements ScoringStrategy {
         answerRecord.setAnswers(answerList);
         return answerRecord;
     }
+
+    private String buildCacheKey(Long appId, String answerList) {
+        return MD5.create().digestHex(appId + ":" + answerList);
+    }
+
 
 }
