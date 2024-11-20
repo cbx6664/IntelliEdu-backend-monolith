@@ -14,8 +14,9 @@ import com.cbx.intelliedu.scoring.annotation.ScoringStrategyConfig;
 import com.cbx.intelliedu.service.QuestionService;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
-import com.sun.org.apache.bcel.internal.generic.NEW;
 import org.apache.commons.lang3.StringUtils;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
 
 import javax.annotation.Resource;
 import java.util.ArrayList;
@@ -23,6 +24,7 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 import static com.cbx.intelliedu.constant.AIConstant.AI_EVALUATION_SCORING_SYSTEM_MESSAGE;
+import static com.cbx.intelliedu.constant.AIConstant.AI_SCORING_LOCK;
 
 
 /**
@@ -36,6 +38,9 @@ public class AiEvaluationScoringStrategy implements ScoringStrategy {
 
     @Resource
     private AiManager aiManager;
+
+    @Resource
+    private RedissonClient redissonClient;
 
     /**
      * 本地缓存
@@ -70,7 +75,7 @@ public class AiEvaluationScoringStrategy implements ScoringStrategy {
         String cacheKey = buildCacheKey(appId, jsonAnswerList);
         String resultCache = answerCacheMap.getIfPresent(cacheKey);
         // 缓存命中
-        if (StringUtils.isNotBlank(resultCache)){
+        if (StringUtils.isNotBlank(resultCache)) {
             AnswerRecord answerRecord = JSONUtil.toBean(resultCache, AnswerRecord.class);
             answerRecord.setAppId(appId);
             answerRecord.setAppType(application.getType());
@@ -78,30 +83,50 @@ public class AiEvaluationScoringStrategy implements ScoringStrategy {
             answerRecord.setAnswers(answerList);
             return answerRecord;
         }
-        // 1. 根据 appId 查询到对应题目
-        Question question = questionService.getQuestionByAppId(appId);
-        QuestionVo questionVo = QuestionVo.objToVo(question);
-        List<QuestionContent> questionContent = questionVo.getQuestions();
-        // 2. 调用 AI 获取结果
-        // 封装 Prompt
-        String userMessage = getAiEvaluationScoringUserMessage(application, questionContent, answerList);
-        // AI 生成
-        String result = aiManager.doRequest(AI_EVALUATION_SCORING_SYSTEM_MESSAGE, userMessage, 1);
-        // 结果处理
-        int start = result.indexOf("{");
-        int end = result.lastIndexOf("}");
-        String json = result.substring(start, end + 1);
 
-        // 缓存结果
-        answerCacheMap.put(cacheKey,json);
+        // 定义锁
+        RLock lock = redissonClient.getLock(AI_SCORING_LOCK + cacheKey);
 
-        // 3. 构造返回值，填充答案对象的属性
-        AnswerRecord answerRecord = JSONUtil.toBean(json, AnswerRecord.class);
-        answerRecord.setAppId(appId);
-        answerRecord.setAppType(application.getType());
-        answerRecord.setStrategy(application.getStrategy());
-        answerRecord.setAnswers(answerList);
-        return answerRecord;
+        try {
+            // 竞争锁
+            boolean tryLock = lock.tryLock(3, 15, TimeUnit.SECONDS);
+            // 没抢到锁，强行返回
+            if (!tryLock) {
+                return null;
+            }
+            // 1. 根据 appId 查询到对应题目
+            Question question = questionService.getQuestionByAppId(appId);
+            QuestionVo questionVo = QuestionVo.objToVo(question);
+            List<QuestionContent> questionContent = questionVo.getQuestions();
+            // 2. 调用 AI 获取结果
+            // 封装 Prompt
+            String userMessage = getAiEvaluationScoringUserMessage(application, questionContent, answerList);
+            // AI 生成
+            String result = aiManager.doRequest(AI_EVALUATION_SCORING_SYSTEM_MESSAGE, userMessage, 1);
+            // 结果处理
+            int start = result.indexOf("{");
+            int end = result.lastIndexOf("}");
+            String json = result.substring(start, end + 1);
+
+            // 缓存结果
+            answerCacheMap.put(cacheKey, json);
+
+            // 3. 构造返回值，填充答案对象的属性
+            AnswerRecord answerRecord = JSONUtil.toBean(json, AnswerRecord.class);
+            answerRecord.setAppId(appId);
+            answerRecord.setAppType(application.getType());
+            answerRecord.setStrategy(application.getStrategy());
+            answerRecord.setAnswers(answerList);
+            return answerRecord;
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        } finally {
+            if (lock != null && lock.isLocked()) {
+                if (lock.isHeldByCurrentThread()) {
+                    lock.unlock();
+                }
+            }
+        }
     }
 
     private String buildCacheKey(Long appId, String answerList) {

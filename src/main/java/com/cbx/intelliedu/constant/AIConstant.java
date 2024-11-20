@@ -2,6 +2,8 @@ package com.cbx.intelliedu.constant;
 
 public class AIConstant {
 
+    public static final String AI_SCORING_LOCK = "AI_SCORING_LOCK";
+
     public static final int MAX_TOKEN_LENGTH = 4095;
 
     public static final String GENERATE_EVALUATION_QUESTION_SYSTEM_MESSAGE = "You are a meticulous question-generation expert. I will provide you with the following information:\n" +
