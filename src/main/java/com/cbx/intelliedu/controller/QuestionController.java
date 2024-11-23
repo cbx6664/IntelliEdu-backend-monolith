@@ -207,7 +207,7 @@ public class QuestionController {
         // 处理 AI 生成题目的请求
         CompletableFuture<String> future = new CompletableFuture<>();
 
-        aiManager.executeChatCompletion(chatCompletionRequest, emitter, future);
+        aiManager.executeChatCompletionWithIsolation(chatCompletionRequest, emitter, future, true);
 
         return emitter;
 
