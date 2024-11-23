@@ -3,7 +3,6 @@ package com.cbx.intelliedu.manager;
 import dev.ai4j.openai4j.OpenAiClient;
 import dev.ai4j.openai4j.chat.*;
 import lombok.extern.slf4j.Slf4j;
-import org.junit.jupiter.api.Test;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
@@ -140,93 +139,82 @@ public class AiManager {
     }
 
     public void executeChatCompletionWithIsolation(ChatCompletionRequest chatCompletionRequest, SseEmitter emitter, CompletableFuture<String> future, boolean isVip) {
-        // 选择线程池
-        ExecutorService threadPool = isVip ? vipThreadPool : normalThreadPool;
+        ExecutorService threadPool = getThreadPool(isVip);
 
-        // 提交任务到对应的线程池
         threadPool.submit(() -> {
             String threadName = Thread.currentThread().getName();
-            log.info("Task started in thread: {}", threadName); // 输出线程信息
-
-            // 如果是普通线程池，暂停 10 秒
-            if (!isVip) {
-                try {
-                    log.info("Pausing task in thread: {} for 10 seconds", threadName);
-                    Thread.sleep(10000); // 暂停 10 秒
-                } catch (InterruptedException e) {
-                    log.error("Interrupted while sleeping in thread: {}", threadName, e);
-                    Thread.currentThread().interrupt(); // 恢复中断状态
-                }
-            }
+            log.info("Task started in thread: {}", threadName);
 
             try {
-                executeChatCompletion(chatCompletionRequest, emitter, future);
+                StringBuilder contentBuilder = new StringBuilder();
+                AtomicInteger flag = new AtomicInteger(0);
+
+                openAiClient.chatCompletion(chatCompletionRequest)
+                        .onPartialResponse(response -> {
+                            String message = response.choices().get(0).delta().content();
+
+                            if (message != null) {
+                                message = message.replaceAll("\\R", " ");
+                                processMessage(contentBuilder, flag, message, emitter, isVip);
+                            }
+                        })
+                        .onComplete(() -> {
+                            future.complete(contentBuilder.toString());
+                            emitter.complete();
+                        })
+                        .onError(throwable -> {
+                            log.error("Error during chat completion", throwable);
+                            future.completeExceptionally(throwable);
+                            emitter.completeWithError(throwable);
+                        })
+                        .execute();
+
+                future.whenComplete((response, throwable) -> {
+                    if (throwable != null) {
+                        log.error("Future completed with error", throwable);
+                        emitter.completeWithError(throwable);
+                    }
+                });
             } catch (Exception e) {
-                log.error("error in executeChatCompletion with respective threadPool", e);
+                log.error("Error in executeChatCompletion with respective threadPool", e);
                 emitter.completeWithError(e);
                 future.completeExceptionally(e);
             }
             log.info("Task completed in thread: {}", threadName);
         });
-
     }
 
-    public void executeChatCompletion(ChatCompletionRequest chatCompletionRequest, SseEmitter emitter, CompletableFuture<String> future) {
-        StringBuilder contentBuilder = new StringBuilder();
-        AtomicInteger flag = new AtomicInteger(0);
+    private ExecutorService getThreadPool(boolean isVip) {
+        return isVip ? vipThreadPool : normalThreadPool;
+    }
 
-        openAiClient.chatCompletion(chatCompletionRequest)
-                .onPartialResponse(response -> {
-                    String message = response.choices().get(0).delta().content();
-
-
-                    if (message != null) {
-                        // openai 返回的字符中可能包括换行符 \n，而 SSE 协议中换行符有特殊含义，用于分隔消息的不同字段，若不处理会造成客户端解析出错
-                        // 解决：将换行符替换为空格，注意不能直接删除所有空白字符，因为单词之间有空格
-                        message = message.replaceAll("\\R", " ");
-
-                        for (char c : message.toCharArray()) {
-                            if (c == '{') {
-                                flag.incrementAndGet();
-                            }
-                            if (flag.get() > 0) {
-                                contentBuilder.append(c);
-                            }
-                            if (c == '}') {
-                                flag.decrementAndGet();
-                                if (flag.get() == 0) {
-                                    try {
-//                                        if(Thread.currentThread().getName()!="")
-                                        emitter.send(contentBuilder.toString());
-                                        contentBuilder.setLength(0);
-                                    } catch (IOException e) {
-                                        log.error("Error sending partial JSON object", e);
-                                        emitter.completeWithError(e);
-                                        return;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                })
-                .onComplete(() -> {
-                    future.complete(contentBuilder.toString());
-                    emitter.complete();
-                })
-                .onError(throwable -> {
-                    log.error("Error during chat completion", throwable);
-                    future.completeExceptionally(throwable);
-                    emitter.completeWithError(throwable);
-                })
-                .execute();
-
-        future.whenComplete((response, throwable) -> {
-            if (throwable != null) {
-                log.error("Future completed with error", throwable);
-                emitter.completeWithError(throwable);
+    private void processMessage(StringBuilder contentBuilder, AtomicInteger flag, String message, SseEmitter emitter, boolean isVip) {
+        for (char c : message.toCharArray()) {
+            if (c == '{') {
+                flag.incrementAndGet();
             }
-        });
+            if (flag.get() > 0) {
+                contentBuilder.append(c);
+            }
+            if (c == '}') {
+                flag.decrementAndGet();
+                if (flag.get() == 0) {
+                    try {
+                        if (!isVip) {
+                            Thread.sleep(10000L);
+                        }
+                        emitter.send(contentBuilder.toString());
+                        contentBuilder.setLength(0);
+                    } catch (IOException e) {
+                        log.error("Error sending partial JSON object", e);
+                        emitter.completeWithError(e);
+                        return;
+                    } catch (InterruptedException e) {
+                        throw new RuntimeException(e);
+                    }
+                }
+            }
+        }
     }
-
 
 }

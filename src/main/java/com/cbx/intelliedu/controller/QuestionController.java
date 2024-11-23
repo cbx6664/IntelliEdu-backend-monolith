@@ -164,13 +164,12 @@ public class QuestionController {
      * @return
      */
     private String getGenerateQuestionUserMessage(Application application, int questionNumber, int optionNumber) {
-        StringBuilder userMessage = new StringBuilder();
-        userMessage.append("Application name: ").append(application.getAppName()).append("\n");
-        userMessage.append("Application description: ").append(application.getDescription()).append("\n");
-        userMessage.append("Application category: ").append(AppType.fromCode(application.getType()).getDescription() + " type").append("\n");
-        userMessage.append("Number of questions to generate: ").append(questionNumber);
-        userMessage.append("Number of options per question: ").append(optionNumber);
-        return userMessage.toString();
+        String userMessage = "Application name: " + application.getAppName() + "\n" +
+                "Application description: " + application.getDescription() + "\n" +
+                "Application category: " + AppType.fromCode(application.getType()).getDescription() + " type" + "\n" +
+                "Number of questions to generate: " + questionNumber +
+                "Number of options per question: " + optionNumber;
+        return userMessage;
     }
 
 
@@ -207,7 +206,7 @@ public class QuestionController {
         // 处理 AI 生成题目的请求
         CompletableFuture<String> future = new CompletableFuture<>();
 
-        aiManager.executeChatCompletionWithIsolation(chatCompletionRequest, emitter, future, true);
+        aiManager.executeChatCompletionWithIsolation(chatCompletionRequest, emitter, future, false);
 
         return emitter;
 
