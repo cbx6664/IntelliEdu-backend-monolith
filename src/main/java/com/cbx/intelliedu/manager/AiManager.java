@@ -19,11 +19,6 @@ import static com.cbx.intelliedu.constant.AIConstant.MAX_TOKEN_LENGTH;
 @Component
 @Slf4j
 public class AiManager {
-    @Test
-    public void test() {
-        System.out.println("1");
-    }
-
     @Resource
     private OpenAiClient openAiClient;
 
