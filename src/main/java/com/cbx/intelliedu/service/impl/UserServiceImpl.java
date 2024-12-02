@@ -231,6 +231,12 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User>
     public boolean deleteUser(Long id) {
         return this.removeById(id);
     }
+
+    @Override
+    public String getRole(HttpServletRequest request) {
+        UserVo userVo = (UserVo) request.getSession().getAttribute(UserConstant.LOGIN_USER);
+        return userVo.getRole();
+    }
 }
 
 

@@ -13,6 +13,7 @@ import com.cbx.intelliedu.model.enums.AppType;
 import com.cbx.intelliedu.model.vo.QuestionVo;
 import com.cbx.intelliedu.service.ApplicationService;
 import com.cbx.intelliedu.service.QuestionService;
+import com.cbx.intelliedu.service.UserService;
 import dev.ai4j.openai4j.chat.ChatCompletionRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
@@ -37,6 +38,9 @@ public class QuestionController {
 
     @Resource
     private ApplicationService applicationService;
+
+    @Resource
+    private UserService userService;
 
 
     @Resource
@@ -164,17 +168,13 @@ public class QuestionController {
      * @return
      */
     private String getGenerateQuestionUserMessage(Application application, int questionNumber, int optionNumber) {
-        String userMessage = "Application name: " + application.getAppName() + "\n" +
-                "Application description: " + application.getDescription() + "\n" +
-                "Application category: " + AppType.fromCode(application.getType()).getDescription() + " type" + "\n" +
-                "Number of questions to generate: " + questionNumber +
-                "Number of options per question: " + optionNumber;
+        String userMessage = "Application name: " + application.getAppName() + "\n" + "Application description: " + application.getDescription() + "\n" + "Application category: " + AppType.fromCode(application.getType()).getDescription() + " type" + "\n" + "Number of questions to generate: " + questionNumber + "Number of options per question: " + optionNumber;
         return userMessage;
     }
 
 
     @GetMapping("/ai_generate/sse")
-    public SseEmitter aiGenerateQuestionSse(Long appId, Integer questionNumber, Integer optionNumber) {
+    public SseEmitter aiGenerateQuestionSse(Long appId, Integer questionNumber, Integer optionNumber, HttpServletRequest request) {
         // 调用 AI 生成题目的请求是否为空
         if (appId == null || questionNumber == null || optionNumber == null) {
             throw new BusinessException(Err.PARAMS_ERROR);
@@ -206,7 +206,17 @@ public class QuestionController {
         // 处理 AI 生成题目的请求
         CompletableFuture<String> future = new CompletableFuture<>();
 
-        aiManager.executeChatCompletionWithIsolation(chatCompletionRequest, emitter, future, false);
+        // 获取访问用户的role
+        String userRole = userService.getRole(request);
+        Boolean isVIP = false;
+        if (userRole.equals("admin")) {
+            isVIP = true;
+        }
+        if (userRole.equals("vip")) {
+            isVIP = true;
+        }
+
+        aiManager.executeChatCompletionWithIsolation(chatCompletionRequest, emitter, future, isVIP);
 
         return emitter;
 

@@ -31,4 +31,6 @@ public interface UserService extends IService<User> {
     boolean updateUser(User user);
 
     boolean deleteUser(Long id);
+
+    String getRole(HttpServletRequest request);
 }

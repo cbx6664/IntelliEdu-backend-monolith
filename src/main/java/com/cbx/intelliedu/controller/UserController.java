@@ -65,6 +65,13 @@ public class UserController {
         return ApiResponse.success(userVo);
     }
 
+    @GetMapping("/get/currentUserRole")
+    @RequiresLogin
+    public ApiResponse<String> getRole(HttpServletRequest request) {
+        String userRole = userService.getRole(request);
+        return ApiResponse.success(userRole);
+    }
+
     @PostMapping("/update/me")
     @RequiresLogin
     public ApiResponse<Boolean> updateMyInfo(@RequestBody UpdateMyInfoRequest updateMyInfoRequest,
