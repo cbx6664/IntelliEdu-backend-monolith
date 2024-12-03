@@ -21,7 +21,9 @@ import org.redisson.api.RedissonClient;
 import javax.annotation.Resource;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 import static com.cbx.intelliedu.constant.AIConstant.AI_EVALUATION_SCORING_SYSTEM_MESSAGE;
 import static com.cbx.intelliedu.constant.AIConstant.AI_SCORING_LOCK;
@@ -60,7 +62,11 @@ public class AiEvaluationScoringStrategy implements ScoringStrategy {
         for (int i = 0; i < questionContentList.size(); i++) {
             AiDoScoreRequest aiDoScoreRequest = new AiDoScoreRequest();
             aiDoScoreRequest.setTitle(questionContentList.get(i).getTitle());
-            aiDoScoreRequest.setUserAnswer(answerList.get(i));
+
+            // 转换 QuestionContent 为 Map，方便根据 answer 找对应的题干
+            Map<String, String> optionMap = questionContentList.get(i).getOptions().stream()
+                    .collect(Collectors.toMap(QuestionContent.Option::getKey, QuestionContent.Option::getValue));
+            aiDoScoreRequest.setUserAnswer(optionMap.get(answerList.get(i)));
             aiDoScoreRequestList.add(aiDoScoreRequest);
         }
         userMessage.append("List of questions and user answers: ").append(JSONUtil.toJsonStr(aiDoScoreRequestList));
